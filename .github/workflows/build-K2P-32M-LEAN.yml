@@ -1,0 +1,170 @@
+name: 编译K2P-32M—LEDE
+
+on:
+  workflow_dispatch:
+  
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  CONFIG_FILE: K2P-32M/.config
+  DIY_SH: K2P-32M/diy.sh
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 当前机器配置
+      run: |
+        echo "警告⚠"
+        echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
+        echo "云编译建议取消勾选Node.js及其相关插件！"
+        echo "已知CPU型号（降序）：7763,8370C,8272CL,8171M,E5系列"
+        echo "--------------------------CPU信息--------------------------"
+        echo "CPU物理数量:$(cat /proc/cpuinfo| grep "physical id"| sort| uniq| wc -l)"
+        echo -e "CPU核心及版本信息：$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo "--------------------------内存信息--------------------------"
+        echo "已安装内存详细信息："
+        sudo lshw -short -C memory | grep GiB
+        echo -e "\n"
+        echo "--------------------------硬盘信息--------------------------"
+        echo -e  "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l) \n"
+        echo "硬盘详情："
+        df -Th
+        
+    - name: 优化磁盘空间
+      uses: "hugoalh/disk-space-optimizer-ghaction@v0.8.1"
+      with:
+        operate_sudo: "True"
+        general_include: ".+"
+        general_exclude: |-
+          ^GCC$
+          ^G\+\+$
+          Clang
+          LLVM
+        docker_include: ".+"
+        docker_prune: "True"
+        docker_clean: "True"
+        apt_prune: "True"
+        apt_clean: "True"
+        homebrew_prune: "True"
+        homebrew_clean: "True"
+        npm_prune: "True"
+        npm_clean: "True"
+        os_swap: "True"
+        
+    - name: 释放磁盘空间
+      uses: easimon/maximize-build-space@master
+      with: 
+        root-reserve-mb: 10240
+        swap-size-mb: 1
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+        remove-docker-images: 'true'
+        
+    - name: 检出代码仓库
+      uses: actions/checkout@main
+      
+    - name: 安装编译环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo -E apt update
+        sudo -E apt -y install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
+        sudo -E apt -y autoremove --purge
+        sudo -E apt -y install libfuse-dev
+        sudo -E apt -y install rename
+        sudo -E apt -y install time
+        sudo -E apt -y install gn
+        sudo -E systemctl daemon-reload
+        sudo -E apt clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo chown $USER:$GROUPS $GITHUB_WORKSPACE    
+        
+    - name: 下载固件源码
+      working-directory: ./
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        cd openwrt
+        sed -i 's|https://github.com/coolsnowwolf/luci.git;openwrt-23.05|https://github.com/coolsnowwolf/luci|g' feeds.conf.default
+        # 添加 ssrp 源
+        sed -i '/github.com\/fw876\/helloworld/d' ./feeds.conf.default
+        echo "src-git ssrp https://github.com/fw876/helloworld.git" >>./feeds.conf.default
+        
+    - name: 缓存
+      uses: stupidloud/cachewrtbuild@main
+      with:
+        ccache: 'true'
+        mixkey: K2P-32M
+        prefix: ${{ github.workspace }}/openwrt  
+        
+    - name: 更新安装 feeds
+      working-directory: ./openwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        
+    - name: 加载.config和自定义脚本
+      run: |
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_SH
+
+    - name: 下载安装包
+      working-directory: ./openwrt
+      run: |
+        make defconfig
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+        
+    - name: 编译固件
+      run: |
+        chmod -R 755 openwrt
+        cd openwrt
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "FILE_DATE=$(date +"%Y-%m-%d")" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+        ls -alh bin/targets/*/*/*-squashfs-sysupgrade.bin
+        echo "编译完成"
+        
+    - name: 整理文件
+      run: | 
+        cd openwrt/bin/targets/*/*
+        zip -rq packages.zip packages/
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+      
+    - name : 上传固件
+      uses: actions/upload-artifact@master
+      if: always()
+      with:
+        name: OpenWrt-K2P-32M
+        path: openwrt/bin/targets/*/*/*-squashfs-sysupgrade.bin
+        
+    - name: 发布Release
+      uses: ncipollo/release-action@main
+      if: ${{ env.PACKAGED_STATUS == 'success' }} && !cancelled()
+      with:
+        tag: K2P-32M+512M+USB_${{ env.FILE_DATE }}
+        artifacts: openwrt/bin/targets/*/*/*
+        allowUpdates: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+        body: |
+          基于lean openwrt构建
+          首次使用建议全新刷写
+          
+          * 基本信息
+          IP: 192.168.2.1
+          账户: root
+          密码: password
+
+          📥 固件下载
+          选squashfs-sysupgrade.bin后缀的
+          K2P的breed布局选官版
+          
