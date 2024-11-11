@@ -6,8 +6,8 @@ on:
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  CONFIG_FILE: K2P-32M/.config
-  DIY_SH: K2P-32M/diy.sh
+  CONFIG_FILE: K2P_32M-LEDE/.config
+  DIY_SH: K2P_32M-LEDE/diy.sh
   TZ: Asia/Shanghai
 
 jobs:
