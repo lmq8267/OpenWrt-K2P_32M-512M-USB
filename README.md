@@ -1,4 +1,7 @@
 # 项目简介
+
+[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Flmq8267%2FOpenWrt-K2P_32M-512M-USB&count_bg=%2395C10D&title_bg=%23555555&icon=github.svg&icon_color=%238DC409&title=%E8%AE%BF%E9%97%AE%E6%95%B0&edge_flat=false)](https://hits.seeyoufarm.com)
+
 本固件适配斐讯 N1 旁路由模式，追求精简纯净!<br>
 1、使用LEAN的openwrt源码，目前集成的都是自己需要的一些插件，L大固件默认勾选的部分插件做了精简！<br>
 2、自编译脚本吸取各个大佬的精华，重点解决了action编译硬盘不够导致编译失败。（踩过很多的坑，让后来者不要再走弯路）<br>
